@@ -6,6 +6,9 @@ import ProductDashboard from "./pages/Dashboard";
 import Sidebar from "./pages/Sidebar";
 import Login from "./Auth/Login";
 import Dashboard from "./Components/Layout/DashBoardLayout";
+import ExpensePage from "./pages/Expense";
+import DebugToken from "./pages/TEST.JSX";
+import Settings from "./pages/Settings";
 
 function MainLayout() {
   return (
@@ -47,6 +50,8 @@ export default function App() {
           <Route path="/employeedashboard" element={<EmployeeDashboard />} />
           <Route path="/products" element={<ProductDashboard />} />
           <Route path="/dashboard" element={<Dashboard  data={data}/>} />
+          <Route path="/expense" element={<ExpensePage/>} />
+          <Route path="/setting" element={<Settings/>} />
         </Route>
 
         {/* DEFAULT ROUTE */}
