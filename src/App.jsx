@@ -9,6 +9,7 @@ import Dashboard from "./Components/Layout/DashBoardLayout";
 import ExpensePage from "./pages/Expense";
 import DebugToken from "./pages/TEST.JSX";
 import Settings from "./pages/Settings";
+import AnalyticsPage from "./pages/Analytics";
 
 function MainLayout() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard  data={data}/>} />
           <Route path="/expense" element={<ExpensePage/>} />
           <Route path="/setting" element={<Settings/>} />
+          <Route path="/analytics" element={<AnalyticsPage/>} />
         </Route>
 
         {/* DEFAULT ROUTE */}

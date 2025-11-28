@@ -78,7 +78,7 @@ const handleLogin = async () => {
                         </div>
                     </div>
                     <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent mb-2 sm:mb-3">
-                        Welcome Back
+                        Welcome to xpensa
                     </h2>
                     <p className="text-gray-500 text-sm sm:text-base">Sign in to continue to your account</p>
                 </div>
@@ -147,7 +147,7 @@ const handleLogin = async () => {
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-3 sm:py-4 px-4 rounded-xl font-semibold focus:ring-4 focus:ring-blue-500/30 focus:ring-offset-2 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] hover:shadow-xl active:scale-[0.99] shadow-lg"
+                        className="w-full bg-gradient-to-r from-blue-600 to-red-600 hover:from-red-700 hover:to-purple-700 text-white py-3 sm:py-4 px-4 rounded-xl font-semibold focus:ring-4 focus:ring-blue-500/30 focus:ring-offset-2 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-[1.02] hover:shadow-xl active:scale-[0.99] shadow-lg"
                     >
                         {isLoading ? (
                             <div className="flex items-center justify-center space-x-2">
@@ -169,14 +169,14 @@ const handleLogin = async () => {
                 </form>
 
                 {/* Divider */}
-                <div className="w-full flex items-center">
+                {/* <div className="w-full flex items-center">
                     <div className="flex-1 border-t border-gray-200"></div>
                     <span className="px-3 text-gray-500 text-sm font-medium">Or continue with</span>
                     <div className="flex-1 border-t border-gray-200"></div>
-                </div>
+                </div> */}
 
                 {/* Social Login Buttons */}
-                <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                {/* <div className="grid grid-cols-2 gap-3 sm:gap-4">
                     <button
                         type="button"
                         className="flex items-center justify-center space-x-2 py-3 px-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-all duration-200 hover:shadow-md"
@@ -198,7 +198,7 @@ const handleLogin = async () => {
                         </svg>
                         <span className="text-sm font-medium text-gray-700">Twitter</span>
                     </button>
-                </div>
+                </div> */}
 
                 {/* Message Display */}
                 {message && (
