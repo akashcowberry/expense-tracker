@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import axios from "axios";
+import axiosInstance from "../api/axiosInstance";
+import { useTheme } from "../context/ThemeContext";
 import { Pencil, Trash2, Plus, AlertCircle, ChevronDown } from "lucide-react";
 
 const API_BASE = "http://127.0.0.1:8000/api/transactions/";
@@ -22,10 +23,13 @@ export default function ExpensePage() {
     title: "",
     amount: "",
     category: "SPEND",
-    transaction_type: "EXPENSE", // Added transaction_type field
+    transaction_type: "EXPENSE",
     status: "COMPLETED",
     date: "",
   });
+
+  // Theme context
+  const { isDark, theme } = useTheme();
 
   // Category options
   const categories = [
@@ -59,12 +63,24 @@ export default function ExpensePage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch Expenses
+  // Fetch Expenses with proper error handling
   const loadExpenses = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await axios.get(API_BASE);
+      console.log("🔍 Loading transactions...");
+      
+      // Test server connection first
+      try {
+        await fetch('http://127.0.0.1:8000/api/test/');
+        console.log("✅ Server is reachable");
+      } catch (serverError) {
+        console.error("❌ Server not reachable:", serverError);
+        throw new Error("Cannot connect to server. Please make sure Django backend is running.");
+      }
+
+      const response = await axiosInstance.get("transactions/");
+      console.log("✅ Transactions response:", response.data);
 
       // Support both: response.data = [...] OR { data: [...] }
       const raw = Array.isArray(response.data)
@@ -74,16 +90,25 @@ export default function ExpensePage() {
       // Ensure each item has a UI category
       const mapped = raw.map((tx) => ({
         ...tx,
-        // If backend sends category, use it; else derive from transaction_type
-        category:
-          tx.category ||
-          (tx.transaction_type === "INCOME" ? "RECEIVED" : "SENT"),
+        category: tx.category || (tx.transaction_type === "INCOME" ? "RECEIVED" : "SENT"),
       }));
 
       setExpenses(mapped);
     } catch (err) {
-      console.error("Error loading expenses:", err);
-      setError("Failed to load transactions. Please try again.");
+      console.error("💥 Error loading expenses:", err);
+      
+      if (err.code === 'ERR_NETWORK') {
+        setError("Network Error: Cannot connect to server. Please check if Django backend is running on http://127.0.0.1:8000");
+      } else if (err.response?.status === 401) {
+        setError("Authentication failed. Please login again.");
+        localStorage.removeItem("access");
+        localStorage.removeItem("refresh");
+        setTimeout(() => window.location.href = "/login", 2000);
+      } else if (err.response?.data) {
+        setError(err.response.data.detail || err.response.data.message || "Failed to load transactions.");
+      } else {
+        setError("Failed to load transactions. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -130,7 +155,6 @@ export default function ExpensePage() {
     const { name, value } = e.target;
     
     if (name === "transaction_type") {
-      // When transaction type changes, update category accordingly
       const newCategory = mapTypeToCategory(value);
       setFormData((prev) => ({
         ...prev,
@@ -138,7 +162,6 @@ export default function ExpensePage() {
         category: newCategory
       }));
     } else if (name === "category") {
-      // When category changes, update transaction type accordingly
       const newTransactionType = mapCategoryToType(value);
       setFormData((prev) => ({
         ...prev,
@@ -153,7 +176,7 @@ export default function ExpensePage() {
     }
   };
 
-  // Submit Form
+  // Submit Form with proper error handling
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -176,10 +199,14 @@ export default function ExpensePage() {
         date: formData.date,
       };
 
+      console.log("💾 Saving transaction:", payload);
+
       if (editingExpense) {
-        await axios.put(`${API_BASE}${editingExpense.id}/`, payload);
+        await axiosInstance.put(`transactions/${editingExpense.id}/`, payload);
+        console.log("✅ Transaction updated successfully");
       } else {
-        await axios.post(API_BASE, payload);
+        await axiosInstance.post("transactions/", payload);
+        console.log("✅ Transaction created successfully");
       }
 
       await loadExpenses();
@@ -193,38 +220,58 @@ export default function ExpensePage() {
         date: "",
       });
     } catch (err) {
-      console.error("Error saving expense:", err);
-      // Try to extract useful error message from DRF
-      const data = err.response?.data;
-      let errorMessage =
-        data?.message ||
-        data?.error ||
-        data?.detail ||
-        "Failed to save transaction. Please try again.";
+      console.error("💥 Error saving expense:", err);
+      
+      if (err.code === 'ERR_NETWORK') {
+        setError("Network Error: Cannot connect to server. Please check your connection.");
+      } else if (err.response?.status === 401) {
+        setError("Authentication failed. Please login again.");
+        localStorage.removeItem("access");
+        localStorage.removeItem("refresh");
+        setTimeout(() => window.location.href = "/login", 2000);
+      } else {
+        // Try to extract useful error message from DRF
+        const data = err.response?.data;
+        let errorMessage = data?.message || data?.error || data?.detail || "Failed to save transaction. Please try again.";
 
-      // If DRF sent field errors like { transaction_type: ["This field is required."] }
-      if (typeof data === "object" && !Array.isArray(data)) {
-        const firstKey = Object.keys(data)[0];
-        if (Array.isArray(data[firstKey])) {
-          errorMessage = `${firstKey}: ${data[firstKey][0]}`;
+        // If DRF sent field errors like { transaction_type: ["This field is required."] }
+        if (typeof data === "object" && !Array.isArray(data)) {
+          const firstKey = Object.keys(data)[0];
+          if (Array.isArray(data[firstKey])) {
+            errorMessage = `${firstKey}: ${data[firstKey][0]}`;
+          } else if (typeof data[firstKey] === 'string') {
+            errorMessage = data[firstKey];
+          }
         }
-      }
 
-      setError(errorMessage);
+        setError(errorMessage);
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Delete Expense
+  // Delete Expense with proper error handling
   const deleteExpense = async (id) => {
     if (window.confirm("Are you sure you want to delete this transaction?")) {
       try {
-        await axios.delete(`${API_BASE}${id}/`);
+        console.log("🗑️ Deleting transaction:", id);
+        await axiosInstance.delete(`transactions/${id}/`);
+        console.log("✅ Transaction deleted successfully");
         await loadExpenses();
       } catch (err) {
-        console.error("Error deleting expense:", err);
-        setError("Failed to delete transaction. Please try again.");
+        console.error("💥 Error deleting expense:", err);
+        
+        if (err.code === 'ERR_NETWORK') {
+          setError("Network Error: Cannot connect to server. Please check your connection.");
+        } else if (err.response?.status === 401) {
+          setError("Authentication failed. Please login again.");
+          localStorage.removeItem("access");
+          localStorage.removeItem("refresh");
+          setTimeout(() => window.location.href = "/login", 2000);
+        } else {
+          setError("Failed to delete transaction. Please try again.");
+        }
       }
     }
   };
@@ -239,13 +286,13 @@ export default function ExpensePage() {
   const getCategoryStyle = (category) => {
     switch (category) {
       case "RECEIVED":
-        return "bg-green-100 text-green-700";
+        return "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300";
       case "SENT":
-        return "bg-red-100 text-red-700";
+        return "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300";
       case "SPEND":
-        return "bg-orange-100 text-orange-700";
+        return "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300";
       default:
-        return "bg-gray-100 text-gray-700";
+        return "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300";
     }
   };
 
@@ -258,16 +305,19 @@ export default function ExpensePage() {
 
   if (loading) {
     return (
-      <div className="p-10 text-center text-xl flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      <div className={`p-6 min-h-screen ${isDark ? 'bg-gray-900' : 'bg-gray-100'} mt-16 lg:mt-0 flex items-center justify-center`}>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Loading Transactions...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 min-h-screen bg-gray-100 mt-16 lg:mt-0">
+    <div className={`p-6 min-h-screen ${isDark ? 'bg-gray-900' : 'bg-gray-100'} mt-16 lg:mt-0`}>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">Transactions</h1>
+        <h1 className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>Transactions</h1>
 
         {/* Dropdown Button */}
         <div className="relative" ref={dropdownRef}>
@@ -286,19 +336,27 @@ export default function ExpensePage() {
 
           {/* Dropdown Menu */}
           {showDropdown && (
-            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg z-50 overflow-hidden border border-gray-200">
+            <div className={`absolute right-0 mt-2 w-48 rounded-xl shadow-lg z-50 overflow-hidden border ${
+              isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+            }`}>
               {categories.map((cat) => (
                 <button
                   key={cat.value}
                   onClick={() => openAddModal(cat.value)}
-                  className="w-full px-4 py-3 text-left hover:bg-gray-50 transition flex items-center gap-3 group"
+                  className={`w-full px-4 py-3 text-left transition flex items-center gap-3 group ${
+                    isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-50'
+                  }`}
                 >
                   <span
                     className={`${cat.color} text-white w-8 h-8 rounded-full flex items-center justify-center font-bold`}
                   >
                     {cat.icon}
                   </span>
-                  <span className="text-gray-700 group-hover:text-indigo-600 font-medium">
+                  <span className={`font-medium ${
+                    isDark 
+                      ? 'text-gray-300 group-hover:text-indigo-400' 
+                      : 'text-gray-700 group-hover:text-indigo-600'
+                  }`}>
                     {cat.label}
                   </span>
                 </button>
@@ -310,12 +368,18 @@ export default function ExpensePage() {
 
       {/* Error Alert */}
       {error && (
-        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-xl flex items-center gap-2">
+        <div className={`mb-4 p-4 rounded-xl flex items-center gap-2 border ${
+          isDark 
+            ? 'bg-red-900 border-red-700 text-red-200' 
+            : 'bg-red-100 border-red-400 text-red-700'
+        }`}>
           <AlertCircle size={20} />
           <span>{error}</span>
           <button
             onClick={() => setError(null)}
-            className="ml-auto text-red-700 hover:text-red-900"
+            className={`ml-auto ${
+              isDark ? 'text-red-300 hover:text-red-100' : 'text-red-700 hover:text-red-900'
+            }`}
           >
             ✕
           </button>
@@ -323,9 +387,13 @@ export default function ExpensePage() {
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-md p-5 overflow-x-auto">
+      <div className={`rounded-xl shadow-md p-5 overflow-x-auto ${
+        isDark ? 'bg-gray-800' : 'bg-white'
+      }`}>
         {expenses.length === 0 ? (
-          <div className="text-center py-10 text-gray-500">
+          <div className={`text-center py-10 ${
+            isDark ? 'text-gray-400' : 'text-gray-500'
+          }`}>
             <p className="text-xl mb-2">No transactions found</p>
             <p className="text-sm">
               Click &quot;Add Transaction&quot; to create your first transaction
@@ -334,14 +402,28 @@ export default function ExpensePage() {
         ) : (
           <table className="w-full border-collapse">
             <thead>
-              <tr className="bg-gray-200">
-                <th className="p-3 text-left">Title</th>
-                <th className="p-3 text-left">Amount</th>
-                <th className="p-3 text-left">Category</th>
-                <th className="p-3 text-left">Type</th>
-                <th className="p-3 text-left">Status</th>
-                <th className="p-3 text-left">Date</th>
-                <th className="p-3 text-center">Actions</th>
+              <tr className={isDark ? 'bg-gray-700' : 'bg-gray-200'}>
+                <th className={`p-3 text-left ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Title</th>
+                <th className={`p-3 text-left ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Amount</th>
+                <th className={`p-3 text-left ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Category</th>
+                <th className={`p-3 text-left ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Type</th>
+                <th className={`p-3 text-left ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Status</th>
+                <th className={`p-3 text-left ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Date</th>
+                <th className={`p-3 text-center ${
+                  isDark ? 'text-gray-300' : 'text-gray-800'
+                }`}>Actions</th>
               </tr>
             </thead>
 
@@ -349,14 +431,18 @@ export default function ExpensePage() {
               {expenses.map((exp) => (
                 <tr
                   key={exp.id}
-                  className="border-b hover:bg-gray-50 transition"
+                  className={`border-b transition ${
+                    isDark 
+                      ? 'border-gray-700 hover:bg-gray-750' 
+                      : 'border-gray-200 hover:bg-gray-50'
+                  }`}
                 >
-                  <td className="p-3 text-black">{exp.title}</td>
+                  <td className={`p-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>{exp.title}</td>
                   <td
                     className={`p-3 font-semibold ${
                       exp.category === "RECEIVED"
-                        ? "text-green-600"
-                        : "text-red-600"
+                        ? "text-green-600 dark:text-green-400"
+                        : "text-red-600 dark:text-red-400"
                     }`}
                   >
                     {formatAmount(exp)}
@@ -374,8 +460,8 @@ export default function ExpensePage() {
                     <span
                       className={`px-3 py-1 rounded-full text-sm font-medium ${
                         exp.transaction_type === "INCOME"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-700"
+                          ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
                       }`}
                     >
                       {exp.transaction_type}
@@ -385,14 +471,14 @@ export default function ExpensePage() {
                     <span
                       className={`px-3 py-1 rounded-full text-sm font-medium ${
                         exp.status === "COMPLETED"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-yellow-100 text-yellow-700"
+                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                          : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
                       }`}
                     >
                       {exp.status}
                     </span>
                   </td>
-                  <td className="p-3 text-black">{exp.date}</td>
+                  <td className={`p-3 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>{exp.date}</td>
 
                   <td className="p-3 flex gap-3 justify-center">
                     <button
@@ -420,14 +506,22 @@ export default function ExpensePage() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-md p-6 relative">
-            <h2 className="text-2xl font-bold mb-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50">
+          <div className={`rounded-xl shadow-lg w-full max-w-md p-6 relative ${
+            isDark ? 'bg-gray-800' : 'bg-white'
+          }`}>
+            <h2 className={`text-2xl font-bold mb-4 ${
+              isDark ? 'text-white' : 'text-gray-900'
+            }`}>
               {editingExpense ? "Edit Transaction" : "Add Transaction"}
             </h2>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-sm flex items-center gap-2">
+              <div className={`mb-4 p-3 rounded-lg text-sm flex items-center gap-2 border ${
+                isDark 
+                  ? 'bg-red-900 border-red-700 text-red-200' 
+                  : 'bg-red-100 border-red-400 text-red-700'
+              }`}>
                 <AlertCircle size={16} />
                 <span>{error}</span>
               </div>
@@ -435,7 +529,9 @@ export default function ExpensePage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Title
                 </label>
                 <input
@@ -443,13 +539,19 @@ export default function ExpensePage() {
                   placeholder="Enter transaction title"
                   value={formData.title}
                   onChange={handleChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl text-black focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                  }`}
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Amount
                 </label>
                 <input
@@ -460,20 +562,30 @@ export default function ExpensePage() {
                   placeholder="0.00"
                   value={formData.amount}
                   onChange={handleChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl text-black focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                  }`}
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Transaction Type
                 </label>
                 <select
                   name="transaction_type"
                   value={formData.transaction_type}
                   onChange={handleChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl text-black focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white' 
+                      : 'bg-white border-gray-300 text-gray-900'
+                  }`}
                   required
                 >
                   {transactionTypes.map((type) => (
@@ -485,14 +597,20 @@ export default function ExpensePage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Category
                 </label>
                 <select
                   name="category"
                   value={formData.category}
                   onChange={handleChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl text-black focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white' 
+                      : 'bg-white border-gray-300 text-gray-900'
+                  }`}
                   required
                 >
                   {categories.map((cat) => (
@@ -504,14 +622,20 @@ export default function ExpensePage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Status
                 </label>
                 <select
                   name="status"
                   value={formData.status}
                   onChange={handleChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl text-black focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white' 
+                      : 'bg-white border-gray-300 text-gray-900'
+                  }`}
                   required
                 >
                   <option value="PENDING">Pending</option>
@@ -520,7 +644,9 @@ export default function ExpensePage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className={`block text-sm font-medium mb-1 ${
+                  isDark ? 'text-gray-300' : 'text-gray-700'
+                }`}>
                   Date
                 </label>
                 <input
@@ -528,7 +654,11 @@ export default function ExpensePage() {
                   type="date"
                   value={formData.date}
                   onChange={handleChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl text-black focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white' 
+                      : 'bg-white border-gray-300 text-gray-900'
+                  }`}
                   required
                 />
               </div>
@@ -537,7 +667,11 @@ export default function ExpensePage() {
                 <button
                   onClick={closeModal}
                   type="button"
-                  className="px-5 py-2 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition"
+                  className={`px-5 py-2 rounded-xl transition ${
+                    isDark 
+                      ? 'bg-gray-600 text-gray-300 hover:bg-gray-500' 
+                      : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+                  }`}
                   disabled={submitting}
                 >
                   Cancel
